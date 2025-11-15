@@ -51,8 +51,8 @@
       font-size: 14px;
     }
     #message-center {
-      margin-top: 8px;
-      font-size: 12px;
+      margin-top: 4px;
+      font-size: 13px;
     }
     .screen {
       position: absolute;
@@ -101,6 +101,19 @@
       font-size: 11px;
       opacity: 0.8;
     }
+    #levelup-banner {
+      position: absolute;
+      top: 32px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 18px;
+      color: #ff0;
+      text-shadow: 0 0 6px #f80;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 5;
+      transition: opacity 0.2s;
+    }
   </style>
 </head>
 <body>
@@ -116,6 +129,8 @@
       <div id="message-center"></div>
     </div>
 
+    <div id="levelup-banner">LEVEL UP!</div>
+
     <!-- タイトル画面 -->
     <div id="start-screen" class="screen active">
       <h1>1分ドット絵シューティング</h1>
@@ -126,28 +141,43 @@
         ・20体撃破ごとにレベルアップして弾が強化<br>
         ・制限時間は 1 分
       </p>
-      <p id="hint">画面をドラッグした位置に自機が移動します。弾は自動で発射されます。</p>
+      <p id="hint">
+        画面をドラッグした位置に自機が移動します。<br>
+        弾は自動で発射されます。最初のスタートで音声の再生も有効になります。
+      </p>
       <button id="start-btn" class="btn">ゲーム開始</button>
     </div>
 
     <!-- ゲームオーバー画面 -->
     <div id="gameover-screen" class="screen">
-      <h1>GAME OVER</h1>
-      <p>TIME: <span id="final-time">0</span>s<br> SCORE: <span id="final-score">0</span></p>
+      <h1>RESULT</h1>
+      <p>
+        TIME: <span id="final-time">0</span>s<br>
+        SCORE: <span id="final-score">0</span><br>
+        LV: <span id="final-level">1</span>
+      </p>
       <p id="result-message"></p>
       <button id="retry-btn" class="btn">もう一度プレイ</button>
     </div>
   </div>
 
+  <!-- 効果音とBGM（実ファイルは別途配置） -->
+  <audio id="se-shoot"  src="audio/shoot.mp3" preload="auto"></audio>
+  <audio id="se-hit"    src="audio/hit.mp3"   preload="auto"></audio>
+  <audio id="se-level"  src="audio/level.mp3" preload="auto"></audio>
+  <audio id="se-clear"  src="audio/clear.mp3" preload="auto"></audio>
+  <audio id="bgm-main"  src="audio/bgm.mp3"   preload="auto" loop></audio>
+
   <script>
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = false; // ドットをくっきり表示
+    ctx.imageSmoothingEnabled = false;
 
     const timeEl = document.getElementById('time');
     const scoreEl = document.getElementById('score');
     const levelEl = document.getElementById('level');
     const msgEl = document.getElementById('message-center');
+    const levelupBanner = document.getElementById('levelup-banner');
 
     const startScreen = document.getElementById('start-screen');
     const gameOverScreen = document.getElementById('gameover-screen');
@@ -155,7 +185,50 @@
     const retryBtn = document.getElementById('retry-btn');
     const finalTimeEl = document.getElementById('final-time');
     const finalScoreEl = document.getElementById('final-score');
+    const finalLevelEl = document.getElementById('final-level');
     const resultMsgEl = document.getElementById('result-message');
+
+    // オーディオ要素
+    const seShoot = document.getElementById('se-shoot');
+    const seHit   = document.getElementById('se-hit');
+    const seLevel = document.getElementById('se-level');
+    const seClear = document.getElementById('se-clear');
+    const bgmMain = document.getElementById('bgm-main');
+
+    bgmMain.volume = 0.18; // 小さめBGM
+    seShoot.volume = 0.35;
+    seHit.volume   = 0.45;
+    seLevel.volume = 0.6;
+    seClear.volume = 0.7;
+
+    let audioUnlocked = false;
+
+    function playClone(baseAudio) {
+      if (!baseAudio) return;
+      const a = baseAudio.cloneNode();
+      a.volume = baseAudio.volume;
+      a.play().catch(() => {});
+    }
+
+    function unlockAudio() {
+      if (audioUnlocked) return;
+      audioUnlocked = true;
+      // ユーザー操作内で一度だけ再生を試みる（モバイルSafari対策）
+      [bgmMain, seShoot, seHit, seLevel, seClear].forEach(a => {
+        try {
+          a.currentTime = 0;
+          a.muted = true;
+          a.play().finally(() => {
+            a.pause();
+            a.muted = false;
+            a.currentTime = 0;
+          });
+        } catch (e) {}
+      });
+      // BGM開始
+      bgmMain.currentTime = 0;
+      bgmMain.play().catch(() => {});
+    }
 
     // ゲーム状態
     let playing = false;
@@ -165,35 +238,32 @@
     let level = 1;
     let killCount = 0;
 
-    // 自機
     const player = {
       x: canvas.width / 2,
-      y: canvas.height - 60, // 少し上に配置して下部バーから離す
+      y: canvas.height - 60,
       w: 12,
       h: 14
     };
 
     const bullets = [];
     const enemies = [];
-    const effects = [];
+    const particles = [];
 
-    const px = 2; // ドットグリッド
+    const px = 2;
 
-    // レベルごとの弾設定
     const LEVEL_CONFIG = [
-      { color: '#ff0', speed: -3.0 }, // Lv1
-      { color: '#0ff', speed: -3.8 }, // Lv2
-      { color: '#f80', speed: -4.6 }, // Lv3
-      { color: '#f0f', speed: -5.4 }  // Lv4以降はこれで固定
+      { color: '#ff0', speed: -3.0 },
+      { color: '#0ff', speed: -3.8 },
+      { color: '#f80', speed: -4.6 },
+      { color: '#f0f', speed: -5.4 }
     ];
-    const BASE_SHOT_INTERVAL = 180; // ms
+    const BASE_SHOT_INTERVAL = 180;
 
     function getLevelConfig() {
       const idx = Math.min(level - 1, LEVEL_CONFIG.length - 1);
       return LEVEL_CONFIG[idx];
     }
 
-    // 敵タイプ
     const ENEMY_TYPES = [
       { name: 'goblin',   color: '#3f3', score: 20 },
       { name: 'slime',    color: '#6ff', score: 15 },
@@ -211,50 +281,42 @@
       levelEl.textContent = level;
       bullets.length = 0;
       enemies.length = 0;
-      effects.length = 0;
+      particles.length = 0;
       player.x = canvas.width / 2;
       player.y = canvas.height - 60;
       lastTime = performance.now();
       msgEl.textContent = '';
+      levelupBanner.style.opacity = 0;
     }
 
-    // 自機描画（解像度上げたジェット機）
     function drawPlayer() {
       const baseX = Math.round(player.x / px) * px;
       const baseY = Math.round(player.y / px) * px;
 
-      // 機体本体
       ctx.fillStyle = '#0ff';
-      // 中央胴体（縦長）
       ctx.fillRect(baseX - 2 * px, baseY - 4 * px, 4 * px, 8 * px);
-      // コックピット
       ctx.fillStyle = '#0bf';
       ctx.fillRect(baseX - 2 * px, baseY - 3 * px, 4 * px, 2 * px);
-      // 機首
       ctx.fillStyle = '#0ff';
       ctx.fillRect(baseX - 1 * px, baseY - 5 * px, 2 * px, px);
-      // 翼（左右に広げる）
       ctx.fillRect(baseX - 4 * px, baseY - 1 * px, 2 * px, 4 * px);
       ctx.fillRect(baseX + 2 * px, baseY - 1 * px, 2 * px, 4 * px);
-      // エンジン付近
       ctx.fillStyle = '#08f';
       ctx.fillRect(baseX - 2 * px, baseY + 2 * px, 4 * px, 2 * px);
-      // 炎
       ctx.fillStyle = '#ff0';
       ctx.fillRect(baseX - px, baseY + 4 * px, 2 * px, px);
     }
 
     function spawnEnemy() {
-      // 時間経過で速度と出現頻度を上げる
       const elapsedRatio = (60 - timeLeft) / 60;
-      const baseSpeed = 0.5 + elapsedRatio * 1.0;
+      const baseSpeed = 0.5 + elapsedRatio * 1.2;
 
       let type;
       const r = Math.random();
-      if (r < 0.4) type = ENEMY_TYPES[0];        // ゴブリン
-      else if (r < 0.7) type = ENEMY_TYPES[1];   // スライム
-      else if (r < 0.9) type = ENEMY_TYPES[2];   // スケルトン
-      else type = ENEMY_TYPES[3];                // 魔王
+      if (r < 0.4) type = ENEMY_TYPES[0];
+      else if (r < 0.7) type = ENEMY_TYPES[1];
+      else if (r < 0.9) type = ENEMY_TYPES[2];
+      else type = ENEMY_TYPES[3];
 
       enemies.push({
         type: type.name,
@@ -262,33 +324,29 @@
         score: type.score,
         x: Math.random() * (canvas.width - 32) + 16,
         y: -16,
-        vy: baseSpeed + Math.random() * 1.0,
+        vy: baseSpeed + Math.random() * 1.2,
         size: 12 + Math.random() * 4,
         hp: type.name === 'demon' ? 4 : 1
       });
     }
 
-    // 解像度を上げた敵ドット絵
     function drawEnemy(e) {
       const bx = Math.round(e.x / px) * px;
       const by = Math.round(e.y / px) * px;
       const s  = Math.round(e.size / px) * px;
 
       if (e.type === 'goblin') {
-        // 緑の頭と耳＋胴
         ctx.fillStyle = e.color;
-        ctx.fillRect(bx - s / 2, by - s / 2, s, s * 0.7);        // 頭
-        ctx.fillRect(bx - s / 2 - px, by - s / 2, px, px * 2);   // 左耳
-        ctx.fillRect(bx + s / 2,       by - s / 2, px, px * 2);  // 右耳
-        ctx.fillRect(bx - s / 3, by + s * 0.2, (2 * s) / 3, s * 0.3); // 胴
-        // 目と口
+        ctx.fillRect(bx - s / 2, by - s / 2, s, s * 0.7);
+        ctx.fillRect(bx - s / 2 - px, by - s / 2, px, px * 2);
+        ctx.fillRect(bx + s / 2,       by - s / 2, px, px * 2);
+        ctx.fillRect(bx - s / 3, by + s * 0.2, (2 * s) / 3, s * 0.3);
         ctx.fillStyle = '#030';
         ctx.fillRect(bx - px, by - px, px, px);
         ctx.fillRect(bx,      by - px, px, px);
         ctx.fillStyle = '#090';
         ctx.fillRect(bx - px, by + px, 2 * px, px);
       } else if (e.type === 'slime') {
-        // 半円形スライム
         ctx.fillStyle = e.color;
         ctx.fillRect(bx - s / 2, by - s / 4, s, s / 2);
         ctx.fillRect(bx - s / 3, by - s / 2, (2 * s) / 3, s / 4);
@@ -296,28 +354,21 @@
         ctx.fillRect(bx - px, by - px / 2, px, px);
         ctx.fillRect(bx,      by - px / 2, px, px);
       } else if (e.type === 'skeleton') {
-        // 白い頭と胴
         ctx.fillStyle = '#eee';
-        ctx.fillRect(bx - s / 2, by - s / 2, s, s * 0.7);        // 頭
-        ctx.fillRect(bx - s / 4, by + s * 0.2, s / 2, s * 0.3);  // 胴
-        // 目穴
+        ctx.fillRect(bx - s / 2, by - s / 2, s, s * 0.7);
+        ctx.fillRect(bx - s / 4, by + s * 0.2, s / 2, s * 0.3);
         ctx.fillStyle = '#000';
         ctx.fillRect(bx - s / 6, by - s / 6, px, px);
         ctx.fillRect(bx + s / 6 - px, by - s / 6, px, px);
-        // 口
         ctx.fillRect(bx - s / 6, by + s / 10, (2 * s) / 6, px);
       } else if (e.type === 'demon') {
-        // 魔王：大きめ＋角
         ctx.fillStyle = e.color;
         ctx.fillRect(bx - s / 2, by - s / 2, s, s);
-        // 角
         ctx.fillRect(bx - s / 2, by - s / 2 - px, px * 2, px);
         ctx.fillRect(bx + s / 2 - px * 2, by - s / 2 - px, px * 2, px);
-        // 目
         ctx.fillStyle = '#ff0';
         ctx.fillRect(bx - px * 2, by - px, px, px);
         ctx.fillRect(bx + px,     by - px, px, px);
-        // 口
         ctx.fillStyle = '#f00';
         ctx.fillRect(bx - px * 2, by + px * 2, px * 4, px);
       }
@@ -331,6 +382,7 @@
         vy: cfg.speed,
         color: cfg.color
       });
+      playClone(seShoot);
     }
 
     function drawBullets() {
@@ -342,28 +394,30 @@
       });
     }
 
-    function spawnHitEffect(x, y, color) {
-      effects.push({
-        x,
-        y,
-        life: 10,
-        color
+    function spawnExplosion(x, y, color) {
+      for (let i = 0; i < 10; i++) {
+        particles.push({
+          x,
+          y,
+          vx: (Math.random() - 0.5) * 2.0,
+          vy: (Math.random() - 0.5) * 2.0,
+          life: 18,
+          maxLife: 18,
+          color
+        });
+      }
+    }
+
+    function drawParticles() {
+      particles.forEach(p => {
+        const alpha = p.life / p.maxLife;
+        ctx.fillStyle = `rgba(255,220,160,${alpha.toFixed(2)})`;
+        const bx = Math.round(p.x / px) * px;
+        const by = Math.round(p.y / px) * px;
+        ctx.fillRect(bx - px, by - px, 2 * px, 2 * px);
       });
     }
 
-    function drawEffects() {
-      effects.forEach(e => {
-        ctx.fillStyle = e.color;
-        const bx = Math.round(e.x / px) * px;
-        const by = Math.round(e.y / px) * px;
-        ctx.fillRect(bx - px, by - px, px, px);
-        ctx.fillRect(bx,      by - px, px, px);
-        ctx.fillRect(bx - px, by,      px, px);
-        ctx.fillRect(bx,      by,      px, px);
-      });
-    }
-
-    // タッチ操作（下端より少し上までに制限）
     function handleTouch(e) {
       if (!playing) return;
       if (e.touches && e.touches.length > 0) {
@@ -371,14 +425,13 @@
         const tx = e.touches[0].clientX - rect.left;
         const ty = e.touches[0].clientY - rect.top;
         player.x = Math.max(16, Math.min(canvas.width - 16, tx));
-        player.y = Math.max(32, Math.min(canvas.height - 40, ty)); // 下に行き過ぎない
+        player.y = Math.max(32, Math.min(canvas.height - 40, ty));
       }
       e.preventDefault();
     }
     canvas.addEventListener('touchstart', handleTouch, { passive: false });
     canvas.addEventListener('touchmove', handleTouch, { passive: false });
 
-    // PCデバッグ用マウス操作
     canvas.addEventListener('mousemove', e => {
       if (!playing) return;
       const rect = canvas.getBoundingClientRect();
@@ -394,14 +447,12 @@
     function update(dt, now) {
       if (!playing) return;
 
-      // 時間経過
       timeLeft -= dt;
       if (timeLeft < 0) timeLeft = 0;
       timeEl.textContent = timeLeft.toFixed(0);
 
       const elapsedRatio = (60 - timeLeft) / 60;
 
-      // レベルに応じた連射間隔
       const shotInterval =
         BASE_SHOT_INTERVAL / (1 + (level - 1) * 0.35);
       if (now - lastShotTime > shotInterval) {
@@ -409,63 +460,67 @@
         lastShotTime = now;
       }
 
-      // 敵出現間隔（だんだん短くなる）
-      const spawnInterval = 900 - elapsedRatio * 450; // 900→450ms
+      // 敵出現：時間経過で間隔短縮し、まとめて複数体スポーン
+      const spawnInterval = 850 - elapsedRatio * 600; // 850 → 250ms
       if (now - lastSpawnTime > spawnInterval) {
-        if (enemies.length < 40) spawnEnemy();
+        const waveCount = 1 + Math.floor(elapsedRatio * 3); // 最大4体
+        for (let i = 0; i < waveCount; i++) {
+          if (enemies.length < 80) spawnEnemy();
+        }
         lastSpawnTime = now;
       }
 
-      // 弾更新
       for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
         b.y += b.vy;
         if (b.y < -20) bullets.splice(i, 1);
       }
 
-      // 敵更新
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
         e.y += e.vy;
         if (e.y > canvas.height + 20) enemies.splice(i, 1);
       }
 
-      // エフェクト更新
-      for (let i = effects.length - 1; i >= 0; i--) {
-        const ef = effects[i];
-        ef.life -= 1;
-        if (ef.life <= 0) effects.splice(i, 1);
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 1;
+        if (p.life <= 0) particles.splice(i, 1);
       }
 
-      // 当たり判定
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
 
-        // 自機との衝突
         if (Math.abs(e.x - player.x) < 12 && Math.abs(e.y - player.y) < 12) {
-          gameOver();
+          gameOver('hit');
           return;
         }
 
-        // 弾との衝突
         for (let j = bullets.length - 1; j >= 0; j--) {
           const b = bullets[j];
           if (Math.abs(e.x - b.x) < 10 && Math.abs(e.y - b.y) < 10) {
             bullets.splice(j, 1);
             e.hp -= 1;
-            spawnHitEffect(e.x, e.y, '#ff8');
+            spawnExplosion(e.x, e.y, e.color);
+            playClone(seHit);
             if (e.hp <= 0) {
               score += e.score;
               scoreEl.textContent = score;
               enemies.splice(i, 1);
-
-              // 撃破数カウント＆レベルアップ判定
               killCount++;
+
               const newLevel = Math.floor(killCount / 20) + 1;
               if (newLevel > level) {
                 level = newLevel;
                 levelEl.textContent = level;
-                msgEl.textContent = 'LEVEL ' + level + '!';
+                msgEl.textContent = 'LEVEL ' + level;
+                levelupBanner.style.opacity = 1;
+                playClone(seLevel);
+                setTimeout(() => {
+                  levelupBanner.style.opacity = 0;
+                }, 800);
                 setTimeout(() => {
                   if (msgEl.textContent.startsWith('LEVEL')) {
                     msgEl.textContent = '';
@@ -479,14 +534,13 @@
       }
 
       if (timeLeft <= 0) {
-        gameOver();
+        gameOver('clear');
       }
     }
 
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 背景のスクロール星空
       ctx.fillStyle = '#060612';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#222233';
@@ -499,7 +553,7 @@
       drawPlayer();
       drawBullets();
       enemies.forEach(drawEnemy);
-      drawEffects();
+      drawParticles();
     }
 
     function loop(timestamp) {
@@ -514,30 +568,40 @@
       requestAnimationFrame(loop);
     }
 
-    function gameOver() {
+    function gameOver(reason) {
       playing = false;
       finalTimeEl.textContent = (60 - timeLeft).toFixed(1);
       finalScoreEl.textContent = score;
+      finalLevelEl.textContent = level;
 
-      if (score >= 1000) {
-        resultMsgEl.textContent = '魔王討伐級！あなたは伝説のパイロットです。';
-      } else if (score >= 600) {
-        resultMsgEl.textContent = 'なかなかの腕前！高レベル維持を狙おう。';
-      } else if (score >= 300) {
-        resultMsgEl.textContent = 'まだまだ伸びしろあり。レベルアップを意識しよう。';
+      if (reason === 'clear') {
+        resultMsgEl.textContent = 'タイムアップ！生還おめでとう！';
+        playClone(seClear);
       } else {
-        resultMsgEl.textContent = 'まずは敵に当たらないことと20体撃破を目指そう。';
+        if (score >= 1000) {
+          resultMsgEl.textContent = '魔王討伐級！あなたは伝説のパイロットです。';
+        } else if (score >= 600) {
+          resultMsgEl.textContent = 'なかなかの腕前！高レベル維持を狙おう。';
+        } else if (score >= 300) {
+          resultMsgEl.textContent = 'まだまだ伸びしろあり。レベルアップを意識しよう。';
+        } else {
+          resultMsgEl.textContent = 'まずは敵に当たらないことと20体撃破を目指そう。';
+        }
+        playClone(seHit);
       }
 
       gameOverScreen.classList.add('active');
     }
 
     function startGame() {
+      unlockAudio();
       resetGame();
       startScreen.classList.remove('active');
       gameOverScreen.classList.remove('active');
       playing = true;
       lastTime = performance.now();
+      bgmMain.currentTime = 0;
+      bgmMain.play().catch(() => {});
     }
 
     startBtn.addEventListener('click', startGame);
