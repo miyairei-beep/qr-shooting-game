@@ -189,11 +189,11 @@
         ・縦画面・片手ドラッグ操作<br>
         ・20体撃破ごとにレベルアップ<br>
         ・EASY: ゆるめの敵配置（60秒）<br>
-        ・NORMAL: 以前のハード相当（60秒）<br>
+        ・NORMAL: 以前のハード相当を少しマイルドに（60秒）<br>
         ・HARD: 地獄級、100秒耐久
       </p>
       <p id="hint">
-        画面をドラッグした位置に自機が移動します。<br>
+        画面をドラッグ／タップした位置に自機が移動します。<br>
         弾は自動で発射されます。
       </p>
       <div class="mode-buttons">
@@ -260,16 +260,18 @@
         patterns: 'none'
       },
       normal: {
+        // 以前のハードを少し弱めた設定
         totalTime: 60,
-        enemySpeedMul: 1.3,
-        spawnBase: 800,
-        spawnScale: 550,
+        enemySpeedMul: 1.2,   // 1.3 → 1.2
+        spawnBase: 820,       // 800 → 820
+        spawnScale: 520,      // 550 → 520
         baseWave: 1,
         waveScale: 3,
-        maxEnemies: 90,
+        maxEnemies: 85,       // 90 → 85
         patterns: 'medium'
       },
       hard: {
+        // 地獄モード
         totalTime: 100,
         enemySpeedMul: 1.6,
         spawnBase: 700,
@@ -498,12 +500,17 @@
       });
     }
 
+    // タッチ操作：CSS拡大を補正してタップ位置に自機を移動
     function handleTouch(e) {
       if (!playing) return;
       if (e.touches && e.touches.length > 0) {
         const rect = canvas.getBoundingClientRect();
-        const tx = e.touches[0].clientX - rect.left;
-        const ty = e.touches[0].clientY - rect.top;
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        const tx = (e.touches[0].clientX - rect.left) * scaleX;
+        const ty = (e.touches[0].clientY - rect.top) * scaleY;
+
         player.x = Math.max(16, Math.min(canvas.width - 16, tx));
         player.y = Math.max(32, Math.min(canvas.height - 40, ty));
       }
@@ -512,11 +519,16 @@
     canvas.addEventListener('touchstart', handleTouch, { passive: false });
     canvas.addEventListener('touchmove', handleTouch, { passive: false });
 
+    // PCデバッグ用マウス操作（同じくスケーリング）
     canvas.addEventListener('mousemove', e => {
       if (!playing) return;
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      const mx = (e.clientX - rect.left) * scaleX;
+      const my = (e.clientY - rect.top) * scaleY;
+
       player.x = Math.max(16, Math.min(canvas.width - 16, mx));
       player.y = Math.max(32, Math.min(canvas.height - 40, my));
     });
@@ -680,7 +692,6 @@
         : difficulty === 'normal' ? 'NORMAL'
         : 'EASY';
 
-      // 豪華な「完全制覇！！」表示
       resultMsgEl.classList.remove('clear');
 
       if (reason === 'clear') {
