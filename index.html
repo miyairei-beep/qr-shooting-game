@@ -101,18 +101,45 @@
       font-size: 11px;
       opacity: 0.8;
     }
+    .mode-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
     #levelup-banner {
       position: absolute;
-      top: 32px;
+      top: 40px;
       left: 50%;
       transform: translateX(-50%);
-      font-size: 18px;
+      font-size: 22px;
       color: #ff0;
-      text-shadow: 0 0 6px #f80;
+      text-shadow: 0 0 8px #f80;
       pointer-events: none;
       opacity: 0;
       z-index: 5;
-      transition: opacity 0.2s;
+    }
+    @keyframes levelup-pop {
+      0% {
+        transform: translateX(-50%) scale(0.4);
+        opacity: 0;
+      }
+      20% {
+        transform: translateX(-50%) scale(1.3);
+        opacity: 1;
+      }
+      60% {
+        transform: translateX(-50%) scale(1.0);
+        opacity: 1;
+      }
+      100% {
+        transform: translateX(-50%) scale(1.0);
+        opacity: 0;
+      }
+    }
+    #levelup-banner.show {
+      animation: levelup-pop 0.9s ease-out forwards;
     }
   </style>
 </head>
@@ -129,23 +156,25 @@
       <div id="message-center"></div>
     </div>
 
-    <div id="levelup-banner">LEVEL UP!</div>
+    <div id="levelup-banner">レベルUP!!!</div>
 
     <!-- タイトル画面 -->
     <div id="start-screen" class="screen active">
       <h1>1分ドット絵シューティング</h1>
       <p>
         ・縦画面・片手ドラッグ操作<br>
-        ・自機はSFジェット機（画面下寄り）<br>
-        ・ゴブリン / スライム / スケルトン / 魔王 を撃破<br>
-        ・20体撃破ごとにレベルアップして弾が強化<br>
-        ・制限時間は 1 分
+        ・20体撃破ごとにレベルアップ<br>
+        ・制限時間は 1 分<br>
+        ・ハードモードでは敵の動きが激しくなります
       </p>
       <p id="hint">
         画面をドラッグした位置に自機が移動します。<br>
-        弾は自動で発射されます。最初のスタートで音声の再生も有効になります。
+        弾は自動で発射されます。
       </p>
-      <button id="start-btn" class="btn">ゲーム開始</button>
+      <div class="mode-buttons">
+        <button id="start-normal-btn" class="btn">ノーマルで開始</button>
+        <button id="start-hard-btn" class="btn">ハードで開始</button>
+      </div>
     </div>
 
     <!-- ゲームオーバー画面 -->
@@ -154,19 +183,16 @@
       <p>
         TIME: <span id="final-time">0</span>s<br>
         SCORE: <span id="final-score">0</span><br>
-        LV: <span id="final-level">1</span>
+        LV: <span id="final-level">1</span><br>
+        MODE: <span id="final-mode">NORMAL</span>
       </p>
       <p id="result-message"></p>
-      <button id="retry-btn" class="btn">もう一度プレイ</button>
+      <div class="mode-buttons">
+        <button id="retry-normal-btn" class="btn">ノーマルで再挑戦</button>
+        <button id="retry-hard-btn" class="btn">ハードで再挑戦</button>
+      </div>
     </div>
   </div>
-
-  <!-- 効果音とBGM（実ファイルは別途配置） -->
-  <audio id="se-shoot"  src="audio/shoot.mp3" preload="auto"></audio>
-  <audio id="se-hit"    src="audio/hit.mp3"   preload="auto"></audio>
-  <audio id="se-level"  src="audio/level.mp3" preload="auto"></audio>
-  <audio id="se-clear"  src="audio/clear.mp3" preload="auto"></audio>
-  <audio id="bgm-main"  src="audio/bgm.mp3"   preload="auto" loop></audio>
 
   <script>
     const canvas = document.getElementById('game');
@@ -181,54 +207,16 @@
 
     const startScreen = document.getElementById('start-screen');
     const gameOverScreen = document.getElementById('gameover-screen');
-    const startBtn = document.getElementById('start-btn');
-    const retryBtn = document.getElementById('retry-btn');
+    const startNormalBtn = document.getElementById('start-normal-btn');
+    const startHardBtn = document.getElementById('start-hard-btn');
+    const retryNormalBtn = document.getElementById('retry-normal-btn');
+    const retryHardBtn = document.getElementById('retry-hard-btn');
+
     const finalTimeEl = document.getElementById('final-time');
     const finalScoreEl = document.getElementById('final-score');
     const finalLevelEl = document.getElementById('final-level');
+    const finalModeEl = document.getElementById('final-mode');
     const resultMsgEl = document.getElementById('result-message');
-
-    // オーディオ要素
-    const seShoot = document.getElementById('se-shoot');
-    const seHit   = document.getElementById('se-hit');
-    const seLevel = document.getElementById('se-level');
-    const seClear = document.getElementById('se-clear');
-    const bgmMain = document.getElementById('bgm-main');
-
-    bgmMain.volume = 0.18; // 小さめBGM
-    seShoot.volume = 0.35;
-    seHit.volume   = 0.45;
-    seLevel.volume = 0.6;
-    seClear.volume = 0.7;
-
-    let audioUnlocked = false;
-
-    function playClone(baseAudio) {
-      if (!baseAudio) return;
-      const a = baseAudio.cloneNode();
-      a.volume = baseAudio.volume;
-      a.play().catch(() => {});
-    }
-
-    function unlockAudio() {
-      if (audioUnlocked) return;
-      audioUnlocked = true;
-      // ユーザー操作内で一度だけ再生を試みる（モバイルSafari対策）
-      [bgmMain, seShoot, seHit, seLevel, seClear].forEach(a => {
-        try {
-          a.currentTime = 0;
-          a.muted = true;
-          a.play().finally(() => {
-            a.pause();
-            a.muted = false;
-            a.currentTime = 0;
-          });
-        } catch (e) {}
-      });
-      // BGM開始
-      bgmMain.currentTime = 0;
-      bgmMain.play().catch(() => {});
-    }
 
     // ゲーム状態
     let playing = false;
@@ -237,6 +225,7 @@
     let lastTime = 0;
     let level = 1;
     let killCount = 0;
+    let difficulty = 'normal'; // 'normal' or 'hard'
 
     const player = {
       x: canvas.width / 2,
@@ -286,7 +275,7 @@
       player.y = canvas.height - 60;
       lastTime = performance.now();
       msgEl.textContent = '';
-      levelupBanner.style.opacity = 0;
+      levelupBanner.classList.remove('show');
     }
 
     function drawPlayer() {
@@ -318,16 +307,35 @@
       else if (r < 0.9) type = ENEMY_TYPES[2];
       else type = ENEMY_TYPES[3];
 
-      enemies.push({
+      const enemy = {
         type: type.name,
         color: type.color,
         score: type.score,
         x: Math.random() * (canvas.width - 32) + 16,
         y: -16,
         vy: baseSpeed + Math.random() * 1.2,
+        vx: 0,
         size: 12 + Math.random() * 4,
-        hp: type.name === 'demon' ? 4 : 1
-      });
+        hp: type.name === 'demon' ? 4 : 1,
+        pattern: 'straight',
+        zigzagDir: Math.random() < 0.5 ? -1 : 1
+      };
+
+      if (difficulty === 'hard') {
+        const pr = Math.random();
+        if (pr < 0.33) {
+          enemy.pattern = 'diagonal';
+          enemy.vx = (Math.random() < 0.5 ? -1 : 1) * (0.6 + elapsedRatio);
+        } else if (pr < 0.66) {
+          enemy.pattern = 'meteor';
+          enemy.vy *= 2.5; // 高速メテオ
+        } else {
+          enemy.pattern = 'zigzag';
+          enemy.vx = enemy.zigzagDir * (0.9 + elapsedRatio * 1.1);
+        }
+      }
+
+      enemies.push(enemy);
     }
 
     function drawEnemy(e) {
@@ -382,7 +390,6 @@
         vy: cfg.speed,
         color: cfg.color
       });
-      playClone(seShoot);
     }
 
     function drawBullets() {
@@ -460,12 +467,11 @@
         lastShotTime = now;
       }
 
-      // 敵出現：時間経過で間隔短縮し、まとめて複数体スポーン
-      const spawnInterval = 850 - elapsedRatio * 600; // 850 → 250ms
+      const spawnInterval = 850 - elapsedRatio * 600;
       if (now - lastSpawnTime > spawnInterval) {
-        const waveCount = 1 + Math.floor(elapsedRatio * 3); // 最大4体
+        const waveCount = 1 + Math.floor(elapsedRatio * (difficulty === 'hard' ? 4 : 3));
         for (let i = 0; i < waveCount; i++) {
-          if (enemies.length < 80) spawnEnemy();
+          if (enemies.length < (difficulty === 'hard' ? 100 : 80)) spawnEnemy();
         }
         lastSpawnTime = now;
       }
@@ -478,7 +484,26 @@
 
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
-        e.y += e.vy;
+
+        if (difficulty === 'hard') {
+          if (e.pattern === 'diagonal') {
+            e.x += e.vx;
+            e.y += e.vy;
+          } else if (e.pattern === 'meteor') {
+            e.y += e.vy;
+          } else if (e.pattern === 'zigzag') {
+            e.y += e.vy;
+            e.x += e.vx;
+            if (e.x < 10 || e.x > canvas.width - 10) {
+              e.vx *= -1;
+            }
+          } else {
+            e.y += e.vy;
+          }
+        } else {
+          e.y += e.vy;
+        }
+
         if (e.y > canvas.height + 20) enemies.splice(i, 1);
       }
 
@@ -504,7 +529,6 @@
             bullets.splice(j, 1);
             e.hp -= 1;
             spawnExplosion(e.x, e.y, e.color);
-            playClone(seHit);
             if (e.hp <= 0) {
               score += e.score;
               scoreEl.textContent = score;
@@ -516,16 +540,14 @@
                 level = newLevel;
                 levelEl.textContent = level;
                 msgEl.textContent = 'LEVEL ' + level;
-                levelupBanner.style.opacity = 1;
-                playClone(seLevel);
-                setTimeout(() => {
-                  levelupBanner.style.opacity = 0;
-                }, 800);
+                levelupBanner.classList.remove('show');
+                void levelupBanner.offsetWidth; // 再アニメ用
+                levelupBanner.classList.add('show');
                 setTimeout(() => {
                   if (msgEl.textContent.startsWith('LEVEL')) {
                     msgEl.textContent = '';
                   }
-                }, 1200);
+                }, 1400);
               }
             }
             break;
@@ -573,10 +595,10 @@
       finalTimeEl.textContent = (60 - timeLeft).toFixed(1);
       finalScoreEl.textContent = score;
       finalLevelEl.textContent = level;
+      finalModeEl.textContent = difficulty === 'hard' ? 'HARD' : 'NORMAL';
 
       if (reason === 'clear') {
         resultMsgEl.textContent = 'タイムアップ！生還おめでとう！';
-        playClone(seClear);
       } else {
         if (score >= 1000) {
           resultMsgEl.textContent = '魔王討伐級！あなたは伝説のパイロットです。';
@@ -587,25 +609,25 @@
         } else {
           resultMsgEl.textContent = 'まずは敵に当たらないことと20体撃破を目指そう。';
         }
-        playClone(seHit);
       }
 
       gameOverScreen.classList.add('active');
     }
 
-    function startGame() {
-      unlockAudio();
+    function startGame(selectedMode) {
+      difficulty = selectedMode;
       resetGame();
       startScreen.classList.remove('active');
       gameOverScreen.classList.remove('active');
       playing = true;
       lastTime = performance.now();
-      bgmMain.currentTime = 0;
-      bgmMain.play().catch(() => {});
+      msgEl.textContent = difficulty === 'hard' ? 'HARD MODE' : '';
     }
 
-    startBtn.addEventListener('click', startGame);
-    retryBtn.addEventListener('click', startGame);
+    startNormalBtn.addEventListener('click', () => startGame('normal'));
+    startHardBtn.addEventListener('click', () => startGame('hard'));
+    retryNormalBtn.addEventListener('click', () => startGame('normal'));
+    retryHardBtn.addEventListener('click', () => startGame('hard'));
 
     lastTime = performance.now();
     requestAnimationFrame(loop);
