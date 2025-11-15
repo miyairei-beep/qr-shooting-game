@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <title>1分ドット絵シューティング</title>
+  <title>ドット絵シューティング</title>
   <meta name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <style>
@@ -160,20 +160,22 @@
 
     <!-- タイトル画面 -->
     <div id="start-screen" class="screen active">
-      <h1>1分ドット絵シューティング</h1>
+      <h1>ドット絵シューティング</h1>
       <p>
         ・縦画面・片手ドラッグ操作<br>
         ・20体撃破ごとにレベルアップ<br>
-        ・ノーマルは60秒、ハードは100秒生存を目指そう<br>
-        ・ハードモードでは敵の動きと数がさらに地獄級になります
+        ・EASY: ゆるめの敵配置（60秒）<br>
+        ・NORMAL: 以前のハード相当（60秒）<br>
+        ・HARD: 地獄級、100秒耐久
       </p>
       <p id="hint">
         画面をドラッグした位置に自機が移動します。<br>
         弾は自動で発射されます。
       </p>
       <div class="mode-buttons">
-        <button id="start-normal-btn" class="btn">ノーマルで開始</button>
-        <button id="start-hard-btn" class="btn">ハードで開始</button>
+        <button id="start-easy-btn" class="btn">EASYで開始</button>
+        <button id="start-normal-btn" class="btn">NORMALで開始</button>
+        <button id="start-hard-btn" class="btn">HARDで開始</button>
       </div>
     </div>
 
@@ -184,12 +186,13 @@
         TIME: <span id="final-time">0</span>s<br>
         SCORE: <span id="final-score">0</span><br>
         LV: <span id="final-level">1</span><br>
-        MODE: <span id="final-mode">NORMAL</span>
+        MODE: <span id="final-mode">EASY</span>
       </p>
       <p id="result-message"></p>
       <div class="mode-buttons">
-        <button id="retry-normal-btn" class="btn">ノーマルで再挑戦</button>
-        <button id="retry-hard-btn" class="btn">ハードで再挑戦</button>
+        <button id="retry-easy-btn" class="btn">EASYで再挑戦</button>
+        <button id="retry-normal-btn" class="btn">NORMALで再挑戦</button>
+        <button id="retry-hard-btn" class="btn">HARDで再挑戦</button>
       </div>
     </div>
   </div>
@@ -207,8 +210,10 @@
 
     const startScreen = document.getElementById('start-screen');
     const gameOverScreen = document.getElementById('gameover-screen');
+    const startEasyBtn = document.getElementById('start-easy-btn');
     const startNormalBtn = document.getElementById('start-normal-btn');
     const startHardBtn = document.getElementById('start-hard-btn');
+    const retryEasyBtn = document.getElementById('retry-easy-btn');
     const retryNormalBtn = document.getElementById('retry-normal-btn');
     const retryHardBtn = document.getElementById('retry-hard-btn');
 
@@ -218,6 +223,45 @@
     const finalModeEl = document.getElementById('final-mode');
     const resultMsgEl = document.getElementById('result-message');
 
+    // 難易度ごとの設定（イージー / 旧ハード相当ノーマル / 地獄ハード）
+    const DIFFICULTY_CONFIG = {
+      easy: {
+        totalTime: 60,
+        enemySpeedMul: 1.0,
+        spawnBase: 900,
+        spawnScale: 500,
+        baseWave: 1,
+        waveScale: 2,
+        maxEnemies: 60,
+        patterns: 'none'    // 直線のみ
+      },
+      normal: {
+        // 前回「地獄化する前」のハード感を想定
+        totalTime: 60,
+        enemySpeedMul: 1.3,
+        spawnBase: 800,
+        spawnScale: 550,
+        baseWave: 1,
+        waveScale: 3,
+        maxEnemies: 90,
+        patterns: 'medium'  // 斜め/メテオ/ジグザグあり（控えめ）
+      },
+      hard: {
+        // 直前の地獄モードをそのまま
+        totalTime: 100,
+        enemySpeedMul: 1.6,
+        spawnBase: 700,
+        spawnScale: 700,
+        baseWave: 2,
+        waveScale: 5,
+        maxEnemies: 120,
+        patterns: 'hell'    // 激しい斜め/メテオ/ジグザグ
+      }
+    };
+
+    // 現在の難易度
+    let difficulty = 'easy';
+
     // ゲーム状態
     let playing = false;
     let timeLeft = 60;
@@ -225,7 +269,6 @@
     let lastTime = 0;
     let level = 1;
     let killCount = 0;
-    let difficulty = 'normal'; // 'normal' or 'hard'
 
     const player = {
       x: canvas.width / 2,
@@ -261,8 +304,8 @@
     ];
 
     function resetGame() {
-      // ハードのみ100秒、ノーマルは60秒
-      timeLeft = difficulty === 'hard' ? 100 : 60;
+      const cfg = DIFFICULTY_CONFIG[difficulty];
+      timeLeft = cfg.totalTime;
       score = 0;
       level = 1;
       killCount = 0;
@@ -298,16 +341,11 @@
     }
 
     function spawnEnemy() {
-      const elapsedRatio = (difficulty === 'hard'
-        ? ( (difficulty === 'hard' ? 100 : 60) - timeLeft ) / (difficulty === 'hard' ? 100 : 60)
-        : (60 - timeLeft) / 60);
-      // 上の行は「今の残り時間から経過割合を出す」式で、ハードは100秒版にしています
+      const cfg = DIFFICULTY_CONFIG[difficulty];
+      const totalTime = cfg.totalTime;
+      const elapsedRatio = (totalTime - timeLeft) / totalTime;
 
-      // ハードではさらに速く
-      let baseSpeed = 0.5 + elapsedRatio * 1.2;
-      if (difficulty === 'hard') {
-        baseSpeed *= 1.6;
-      }
+      let baseSpeed = (0.5 + elapsedRatio * 1.2) * cfg.enemySpeedMul;
 
       let type;
       const r = Math.random();
@@ -330,17 +368,28 @@
         zigzagDir: Math.random() < 0.5 ? -1 : 1
       };
 
-      if (difficulty === 'hard') {
+      // 難易度別の動きパターン設定
+      if (cfg.patterns === 'medium' || cfg.patterns === 'hell') {
         const pr = Math.random();
         if (pr < 0.33) {
+          // 斜め
           enemy.pattern = 'diagonal';
-          enemy.vx = (Math.random() < 0.5 ? -1 : 1) * (1.0 + elapsedRatio * 1.4);
+          const mul = cfg.patterns === 'hell'
+            ? (1.0 + elapsedRatio * 1.4)
+            : (0.8 + elapsedRatio * 0.9);
+          enemy.vx = (Math.random() < 0.5 ? -1 : 1) * mul;
         } else if (pr < 0.66) {
+          // メテオ
+          const meteorMul = cfg.patterns === 'hell' ? 3.2 : 2.3;
           enemy.pattern = 'meteor';
-          enemy.vy *= 3.2; // さらに速いメテオ
+          enemy.vy *= meteorMul;
         } else {
+          // ジグザグ
           enemy.pattern = 'zigzag';
-          enemy.vx = enemy.zigzagDir * (1.4 + elapsedRatio * 1.6);
+          const zigMul = cfg.patterns === 'hell'
+            ? (1.4 + elapsedRatio * 1.6)
+            : (0.9 + elapsedRatio * 1.1);
+          enemy.vx = enemy.zigzagDir * zigMul;
         }
       }
 
@@ -418,8 +467,7 @@
           vx: (Math.random() - 0.5) * 2.0,
           vy: (Math.random() - 0.5) * 2.0,
           life: 18,
-          maxLife: 18,
-          color
+          maxLife: 18
         });
       }
     }
@@ -463,12 +511,12 @@
     function update(dt, now) {
       if (!playing) return;
 
+      const cfg = DIFFICULTY_CONFIG[difficulty];
       timeLeft -= dt;
       if (timeLeft < 0) timeLeft = 0;
       timeEl.textContent = timeLeft.toFixed(0);
 
-      // 経過割合（ノーマル60秒・ハード100秒で正規化）
-      const totalTime = difficulty === 'hard' ? 100 : 60;
+      const totalTime = cfg.totalTime;
       const elapsedRatio = (totalTime - timeLeft) / totalTime;
 
       const shotInterval =
@@ -478,19 +526,14 @@
         lastShotTime = now;
       }
 
-      // ハードは出現間隔がさらに短く、同時出現も多い
-      const baseInterval = difficulty === 'hard' ? 700 : 850;
-      const scaleInterval = difficulty === 'hard' ? 700 : 600;
-      const spawnInterval = baseInterval - elapsedRatio * scaleInterval;
+      const spawnInterval =
+        cfg.spawnBase - elapsedRatio * cfg.spawnScale;
 
       if (now - lastSpawnTime > spawnInterval) {
-        const baseWave = difficulty === 'hard' ? 2 : 1;
-        const scaleWave = difficulty === 'hard' ? 5 : 3;
-        const waveCount = baseWave + Math.floor(elapsedRatio * scaleWave);
-        const maxEnemies = difficulty === 'hard' ? 120 : 80;
-
+        const waveCount =
+          cfg.baseWave + Math.floor(elapsedRatio * cfg.waveScale);
         for (let i = 0; i < waveCount; i++) {
-          if (enemies.length < maxEnemies) spawnEnemy();
+          if (enemies.length < cfg.maxEnemies) spawnEnemy();
         }
         lastSpawnTime = now;
       }
@@ -504,7 +547,9 @@
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
 
-        if (difficulty === 'hard') {
+        if (DIFFICULTY_CONFIG[difficulty].patterns === 'none') {
+          e.y += e.vy;
+        } else {
           if (e.pattern === 'diagonal') {
             e.x += e.vx;
             e.y += e.vy;
@@ -519,8 +564,6 @@
           } else {
             e.y += e.vy;
           }
-        } else {
-          e.y += e.vy;
         }
 
         if (e.y > canvas.height + 20) enemies.splice(i, 1);
@@ -611,17 +654,22 @@
 
     function gameOver(reason) {
       playing = false;
-      const totalTime = difficulty === 'hard' ? 100 : 60;
+      const cfg = DIFFICULTY_CONFIG[difficulty];
+      const totalTime = cfg.totalTime;
       finalTimeEl.textContent = (totalTime - timeLeft).toFixed(1);
       finalScoreEl.textContent = score;
       finalLevelEl.textContent = level;
-      finalModeEl.textContent = difficulty === 'hard' ? 'HARD' : 'NORMAL';
+      finalModeEl.textContent =
+        difficulty === 'hard' ? 'HARD'
+        : difficulty === 'normal' ? 'NORMAL'
+        : 'EASY';
 
       if (reason === 'clear') {
-        resultMsgEl.textContent =
-          difficulty === 'hard'
-            ? '100秒耐久クリア！お見事！'
-            : 'タイムアップ！生還おめでとう！';
+        if (difficulty === 'hard') {
+          resultMsgEl.textContent = '100秒耐久クリア！お見事！';
+        } else {
+          resultMsgEl.textContent = 'タイムアップ！生還おめでとう！';
+        }
       } else {
         if (score >= 1000) {
           resultMsgEl.textContent = '魔王討伐級！あなたは伝説のパイロットです。';
@@ -644,11 +692,18 @@
       gameOverScreen.classList.remove('active');
       playing = true;
       lastTime = performance.now();
-      msgEl.textContent = difficulty === 'hard' ? 'HARD MODE' : '';
+      msgEl.textContent =
+        difficulty === 'hard'
+          ? 'HARD MODE'
+          : difficulty === 'normal'
+            ? 'NORMAL MODE'
+            : '';
     }
 
+    startEasyBtn.addEventListener('click', () => startGame('easy'));
     startNormalBtn.addEventListener('click', () => startGame('normal'));
     startHardBtn.addEventListener('click', () => startGame('hard'));
+    retryEasyBtn.addEventListener('click', () => startGame('easy'));
     retryNormalBtn.addEventListener('click', () => startGame('normal'));
     retryHardBtn.addEventListener('click', () => startGame('hard'));
 
