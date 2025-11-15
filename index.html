@@ -10,7 +10,7 @@
       margin: 0;
       padding: 0;
       box-sizing: border-box;
-      touch-action: none; /* モバイルでのダブルタップズーム等を抑制 */
+      touch-action: none;
     }
     body {
       margin: 0;
@@ -29,7 +29,7 @@
     canvas {
       background: #101018;
       image-rendering: pixelated;
-      width: 360px;   /* 表示サイズ（CSS） */
+      width: 360px;
       height: 640px;
       border: 2px solid #444;
       display: block;
@@ -47,7 +47,7 @@
     #ui-top {
       display: flex;
       justify-content: space-between;
-      padding: 0 16px;
+      padding: 0 8px;
       font-size: 14px;
     }
     #message-center {
@@ -110,6 +110,7 @@
     <div id="ui-overlay">
       <div id="ui-top">
         <div>TIME: <span id="time">60</span>s</div>
+        <div>LV: <span id="level">1</span></div>
         <div>SCORE: <span id="score">0</span></div>
       </div>
       <div id="message-center"></div>
@@ -120,11 +121,12 @@
       <h1>1分ドット絵シューティング</h1>
       <p>
         ・縦画面・片手ドラッグ操作<br>
-        ・自機はSFジェット機<br>
+        ・自機はSFジェット機（画面下寄り）<br>
         ・ゴブリン / スライム / スケルトン / 魔王 を撃破<br>
+        ・20体撃破ごとにレベルアップして弾が強化<br>
         ・制限時間は 1 分
       </p>
-      <p id="hint">画面をタッチした位置に自機が移動します。弾は自動で発射されます。</p>
+      <p id="hint">画面をドラッグした位置に自機が移動します。弾は自動で発射されます。</p>
       <button id="start-btn" class="btn">ゲーム開始</button>
     </div>
 
@@ -140,12 +142,11 @@
   <script>
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
-
-    // ピクセルアートをくっきり表示
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = false; // ドットをくっきり表示
 
     const timeEl = document.getElementById('time');
     const scoreEl = document.getElementById('score');
+    const levelEl = document.getElementById('level');
     const msgEl = document.getElementById('message-center');
 
     const startScreen = document.getElementById('start-screen');
@@ -161,70 +162,92 @@
     let timeLeft = 60;
     let score = 0;
     let lastTime = 0;
+    let level = 1;
+    let killCount = 0;
 
     // 自機
     const player = {
       x: canvas.width / 2,
-      y: canvas.height - 40,
-      w: 10,
-      h: 12
+      y: canvas.height - 60, // 少し上に配置して下部バーから離す
+      w: 12,
+      h: 14
     };
 
-    // 弾と敵
     const bullets = [];
     const enemies = [];
-    const effects = []; // 簡易ヒットエフェクト
+    const effects = [];
 
-    const px = 2; // ドット粒度
+    const px = 2; // ドットグリッド
+
+    // レベルごとの弾設定
+    const LEVEL_CONFIG = [
+      { color: '#ff0', speed: -3.0 }, // Lv1
+      { color: '#0ff', speed: -3.8 }, // Lv2
+      { color: '#f80', speed: -4.6 }, // Lv3
+      { color: '#f0f', speed: -5.4 }  // Lv4以降はこれで固定
+    ];
+    const BASE_SHOT_INTERVAL = 180; // ms
+
+    function getLevelConfig() {
+      const idx = Math.min(level - 1, LEVEL_CONFIG.length - 1);
+      return LEVEL_CONFIG[idx];
+    }
 
     // 敵タイプ
     const ENEMY_TYPES = [
       { name: 'goblin',   color: '#3f3', score: 20 },
       { name: 'slime',    color: '#6ff', score: 15 },
       { name: 'skeleton', color: '#fff', score: 25 },
-      { name: 'demon',    color: '#f3f', score: 100 }
+      { name: 'demon',    color: '#f3f', score: 120 }
     ];
 
     function resetGame() {
       timeLeft = 60;
       score = 0;
+      level = 1;
+      killCount = 0;
       timeEl.textContent = timeLeft;
       scoreEl.textContent = score;
+      levelEl.textContent = level;
       bullets.length = 0;
       enemies.length = 0;
       effects.length = 0;
       player.x = canvas.width / 2;
-      player.y = canvas.height - 40;
+      player.y = canvas.height - 60;
       lastTime = performance.now();
       msgEl.textContent = '';
     }
 
-    // 自機描画（SFっぽいジェット、シルエット重視でデフォルメ）
+    // 自機描画（解像度上げたジェット機）
     function drawPlayer() {
       const baseX = Math.round(player.x / px) * px;
       const baseY = Math.round(player.y / px) * px;
 
-      // 機体色
+      // 機体本体
       ctx.fillStyle = '#0ff';
-      // 胴体
-      ctx.fillRect(baseX - 2 * px, baseY - 3 * px, 4 * px, 6 * px);
+      // 中央胴体（縦長）
+      ctx.fillRect(baseX - 2 * px, baseY - 4 * px, 4 * px, 8 * px);
+      // コックピット
+      ctx.fillStyle = '#0bf';
+      ctx.fillRect(baseX - 2 * px, baseY - 3 * px, 4 * px, 2 * px);
       // 機首
-      ctx.fillRect(baseX - 1 * px, baseY - 4 * px, 2 * px, 1 * px);
-      // 翼
-      ctx.fillRect(baseX - 3 * px, baseY - 1 * px, 1 * px, 3 * px);
-      ctx.fillRect(baseX + 2 * px, baseY - 1 * px, 1 * px, 3 * px);
-      // エンジン
+      ctx.fillStyle = '#0ff';
+      ctx.fillRect(baseX - 1 * px, baseY - 5 * px, 2 * px, px);
+      // 翼（左右に広げる）
+      ctx.fillRect(baseX - 4 * px, baseY - 1 * px, 2 * px, 4 * px);
+      ctx.fillRect(baseX + 2 * px, baseY - 1 * px, 2 * px, 4 * px);
+      // エンジン付近
       ctx.fillStyle = '#08f';
-      ctx.fillRect(baseX - px, baseY + 2 * px, 2 * px, px);
+      ctx.fillRect(baseX - 2 * px, baseY + 2 * px, 4 * px, 2 * px);
       // 炎
       ctx.fillStyle = '#ff0';
-      ctx.fillRect(baseX - px, baseY + 3 * px, 2 * px, px);
+      ctx.fillRect(baseX - px, baseY + 4 * px, 2 * px, px);
     }
 
     function spawnEnemy() {
-      // 時間経過で少しずつ出現頻度と速度を上げる
-      const elapsedRatio = (60 - timeLeft) / 60; // 0〜1
-      const baseSpeed = 0.4 + elapsedRatio * 0.8;
+      // 時間経過で速度と出現頻度を上げる
+      const elapsedRatio = (60 - timeLeft) / 60;
+      const baseSpeed = 0.5 + elapsedRatio * 1.0;
 
       let type;
       const r = Math.random();
@@ -237,73 +260,85 @@
         type: type.name,
         color: type.color,
         score: type.score,
-        x: Math.random() * (canvas.width - 20) + 10,
-        y: -10,
-        vy: baseSpeed + Math.random() * 0.8,
-        size: 8 + Math.random() * 4,
-        hp: type.name === 'demon' ? 3 : 1
+        x: Math.random() * (canvas.width - 32) + 16,
+        y: -16,
+        vy: baseSpeed + Math.random() * 1.0,
+        size: 12 + Math.random() * 4,
+        hp: type.name === 'demon' ? 4 : 1
       });
     }
 
+    // 解像度を上げた敵ドット絵
     function drawEnemy(e) {
-      ctx.fillStyle = e.color;
       const bx = Math.round(e.x / px) * px;
       const by = Math.round(e.y / px) * px;
       const s  = Math.round(e.size / px) * px;
 
       if (e.type === 'goblin') {
-        // 頭+耳
-        ctx.fillRect(bx - s / 2, by - s / 2, s, s);
-        ctx.fillRect(bx - s / 2 - px, by - s / 2, px, px);
-        ctx.fillRect(bx + s / 2,     by - s / 2, px, px);
-        // 目
+        // 緑の頭と耳＋胴
+        ctx.fillStyle = e.color;
+        ctx.fillRect(bx - s / 2, by - s / 2, s, s * 0.7);        // 頭
+        ctx.fillRect(bx - s / 2 - px, by - s / 2, px, px * 2);   // 左耳
+        ctx.fillRect(bx + s / 2,       by - s / 2, px, px * 2);  // 右耳
+        ctx.fillRect(bx - s / 3, by + s * 0.2, (2 * s) / 3, s * 0.3); // 胴
+        // 目と口
         ctx.fillStyle = '#030';
         ctx.fillRect(bx - px, by - px, px, px);
         ctx.fillRect(bx,      by - px, px, px);
+        ctx.fillStyle = '#090';
+        ctx.fillRect(bx - px, by + px, 2 * px, px);
       } else if (e.type === 'slime') {
+        // 半円形スライム
         ctx.fillStyle = e.color;
         ctx.fillRect(bx - s / 2, by - s / 4, s, s / 2);
-        ctx.fillRect(bx - s / 4, by - s / 2, s / 2, s / 4);
+        ctx.fillRect(bx - s / 3, by - s / 2, (2 * s) / 3, s / 4);
         ctx.fillStyle = '#055';
         ctx.fillRect(bx - px, by - px / 2, px, px);
         ctx.fillRect(bx,      by - px / 2, px, px);
       } else if (e.type === 'skeleton') {
+        // 白い頭と胴
         ctx.fillStyle = '#eee';
-        ctx.fillRect(bx - s / 3, by - s / 3, (2 * s) / 3, (2 * s) / 3);
+        ctx.fillRect(bx - s / 2, by - s / 2, s, s * 0.7);        // 頭
+        ctx.fillRect(bx - s / 4, by + s * 0.2, s / 2, s * 0.3);  // 胴
         // 目穴
         ctx.fillStyle = '#000';
-        ctx.fillRect(bx - s / 6, by - s / 8, px, px);
-        ctx.fillRect(bx + s / 6 - px, by - s / 8, px, px);
+        ctx.fillRect(bx - s / 6, by - s / 6, px, px);
+        ctx.fillRect(bx + s / 6 - px, by - s / 6, px, px);
         // 口
-        ctx.fillRect(bx - s / 6, by + s / 8, (2 * s) / 6, px);
+        ctx.fillRect(bx - s / 6, by + s / 10, (2 * s) / 6, px);
       } else if (e.type === 'demon') {
-        // 魔王ぽい大きめシルエット
+        // 魔王：大きめ＋角
         ctx.fillStyle = e.color;
         ctx.fillRect(bx - s / 2, by - s / 2, s, s);
         // 角
-        ctx.fillRect(bx - s / 2, by - s / 2 - px, px, px);
-        ctx.fillRect(bx + s / 2 - px, by - s / 2 - px, px, px);
+        ctx.fillRect(bx - s / 2, by - s / 2 - px, px * 2, px);
+        ctx.fillRect(bx + s / 2 - px * 2, by - s / 2 - px, px * 2, px);
         // 目
         ctx.fillStyle = '#ff0';
-        ctx.fillRect(bx - px, by - px, px, px);
-        ctx.fillRect(bx,      by - px, px, px);
+        ctx.fillRect(bx - px * 2, by - px, px, px);
+        ctx.fillRect(bx + px,     by - px, px, px);
+        // 口
+        ctx.fillStyle = '#f00';
+        ctx.fillRect(bx - px * 2, by + px * 2, px * 4, px);
       }
     }
 
     function shoot() {
+      const cfg = getLevelConfig();
       bullets.push({
         x: player.x,
-        y: player.y - 8,
-        vy: -3
+        y: player.y - 10,
+        vy: cfg.speed,
+        color: cfg.color
       });
     }
 
     function drawBullets() {
-      ctx.fillStyle = '#ff0';
       bullets.forEach(b => {
+        ctx.fillStyle = b.color;
         const bx = Math.round(b.x / px) * px;
         const by = Math.round(b.y / px) * px;
-        ctx.fillRect(bx - px, by - 2 * px, 2 * px, 4 * px);
+        ctx.fillRect(bx - px, by - 3 * px, 2 * px, 6 * px);
       });
     }
 
@@ -328,32 +363,31 @@
       });
     }
 
-    // タッチ操作
+    // タッチ操作（下端より少し上までに制限）
     function handleTouch(e) {
       if (!playing) return;
       if (e.touches && e.touches.length > 0) {
         const rect = canvas.getBoundingClientRect();
         const tx = e.touches[0].clientX - rect.left;
         const ty = e.touches[0].clientY - rect.top;
-        player.x = Math.max(12, Math.min(canvas.width - 12, tx));
-        player.y = Math.max(16, Math.min(canvas.height - 16, ty));
+        player.x = Math.max(16, Math.min(canvas.width - 16, tx));
+        player.y = Math.max(32, Math.min(canvas.height - 40, ty)); // 下に行き過ぎない
       }
       e.preventDefault();
     }
     canvas.addEventListener('touchstart', handleTouch, { passive: false });
     canvas.addEventListener('touchmove', handleTouch, { passive: false });
 
-    // PCデバッグ用マウス操作（任意）
+    // PCデバッグ用マウス操作
     canvas.addEventListener('mousemove', e => {
       if (!playing) return;
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
-      player.x = Math.max(12, Math.min(canvas.width - 12, mx));
-      player.y = Math.max(16, Math.min(canvas.height - 16, my));
+      player.x = Math.max(16, Math.min(canvas.width - 16, mx));
+      player.y = Math.max(32, Math.min(canvas.height - 40, my));
     });
 
-    // メインループ関連
     let lastShotTime = 0;
     let lastSpawnTime = 0;
 
@@ -365,17 +399,20 @@
       if (timeLeft < 0) timeLeft = 0;
       timeEl.textContent = timeLeft.toFixed(0);
 
-      // 自動ショット（0.18秒ごと）
-      if (now - lastShotTime > 180) {
+      const elapsedRatio = (60 - timeLeft) / 60;
+
+      // レベルに応じた連射間隔
+      const shotInterval =
+        BASE_SHOT_INTERVAL / (1 + (level - 1) * 0.35);
+      if (now - lastShotTime > shotInterval) {
         shoot();
         lastShotTime = now;
       }
 
-      // 敵出現（難易度に応じて間隔を短く）
-      const elapsedRatio = (60 - timeLeft) / 60;
-      const spawnInterval = 900 - elapsedRatio * 400; // 900〜500ms
+      // 敵出現間隔（だんだん短くなる）
+      const spawnInterval = 900 - elapsedRatio * 450; // 900→450ms
       if (now - lastSpawnTime > spawnInterval) {
-        spawnEnemy();
+        if (enemies.length < 40) spawnEnemy();
         lastSpawnTime = now;
       }
 
@@ -383,7 +420,7 @@
       for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
         b.y += b.vy;
-        if (b.y < -10) bullets.splice(i, 1);
+        if (b.y < -20) bullets.splice(i, 1);
       }
 
       // 敵更新
@@ -404,8 +441,8 @@
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
 
-        // 自機と衝突
-        if (Math.abs(e.x - player.x) < 10 && Math.abs(e.y - player.y) < 10) {
+        // 自機との衝突
+        if (Math.abs(e.x - player.x) < 12 && Math.abs(e.y - player.y) < 12) {
           gameOver();
           return;
         }
@@ -413,7 +450,7 @@
         // 弾との衝突
         for (let j = bullets.length - 1; j >= 0; j--) {
           const b = bullets[j];
-          if (Math.abs(e.x - b.x) < 8 && Math.abs(e.y - b.y) < 8) {
+          if (Math.abs(e.x - b.x) < 10 && Math.abs(e.y - b.y) < 10) {
             bullets.splice(j, 1);
             e.hp -= 1;
             spawnHitEffect(e.x, e.y, '#ff8');
@@ -421,13 +458,26 @@
               score += e.score;
               scoreEl.textContent = score;
               enemies.splice(i, 1);
+
+              // 撃破数カウント＆レベルアップ判定
+              killCount++;
+              const newLevel = Math.floor(killCount / 20) + 1;
+              if (newLevel > level) {
+                level = newLevel;
+                levelEl.textContent = level;
+                msgEl.textContent = 'LEVEL ' + level + '!';
+                setTimeout(() => {
+                  if (msgEl.textContent.startsWith('LEVEL')) {
+                    msgEl.textContent = '';
+                  }
+                }, 1200);
+              }
             }
             break;
           }
         }
       }
 
-      // 制限時間終了
       if (timeLeft <= 0) {
         gameOver();
       }
@@ -436,12 +486,12 @@
     function render() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 背景の簡易スクロール星空
+      // 背景のスクロール星空
       ctx.fillStyle = '#060612';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.fillStyle = '#222233';
-      for (let i = 0; i < 30; i++) {
-        const x = (i * 23 + Math.floor(performance.now() / 40)) % canvas.width;
+      for (let i = 0; i < 40; i++) {
+        const x = (i * 29 + Math.floor(performance.now() / 40)) % canvas.width;
         const y = (i * 37 + Math.floor(performance.now() / 80)) % canvas.height;
         ctx.fillRect(Math.round(x / px) * px, Math.round(y / px) * px, px, px);
       }
@@ -469,14 +519,14 @@
       finalTimeEl.textContent = (60 - timeLeft).toFixed(1);
       finalScoreEl.textContent = score;
 
-      if (score >= 800) {
+      if (score >= 1000) {
         resultMsgEl.textContent = '魔王討伐級！あなたは伝説のパイロットです。';
-      } else if (score >= 400) {
-        resultMsgEl.textContent = 'なかなかの腕前！魔王討伐を目指そう。';
-      } else if (score >= 200) {
-        resultMsgEl.textContent = 'まだまだ伸びしろあり。敵の動きをよく見よう。';
+      } else if (score >= 600) {
+        resultMsgEl.textContent = 'なかなかの腕前！高レベル維持を狙おう。';
+      } else if (score >= 300) {
+        resultMsgEl.textContent = 'まだまだ伸びしろあり。レベルアップを意識しよう。';
       } else {
-        resultMsgEl.textContent = 'まずは敵に当たらないことを意識しよう。';
+        resultMsgEl.textContent = 'まずは敵に当たらないことと20体撃破を目指そう。';
       }
 
       gameOverScreen.classList.add('active');
@@ -493,7 +543,6 @@
     startBtn.addEventListener('click', startGame);
     retryBtn.addEventListener('click', startGame);
 
-    // 最初のフレーム開始
     lastTime = performance.now();
     requestAnimationFrame(loop);
   </script>
