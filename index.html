@@ -91,6 +91,18 @@
       transform: translateY(1px);
       background: #044;
     }
+    /* HARDボタンだけ薄い赤色 */
+    #start-hard-btn,
+    #retry-hard-btn {
+      background: #402020;
+      border-color: #f88;
+      color: #ffdede;
+    }
+    #start-hard-btn:active,
+    #retry-hard-btn:active {
+      background: #5a2525;
+    }
+
     #start-screen, #gameover-screen {
       display: none;
     }
@@ -140,6 +152,18 @@
     }
     #levelup-banner.show {
       animation: levelup-pop 0.9s ease-out forwards;
+    }
+
+    /* 完全制覇用の豪華表示 */
+    #result-message {
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    #result-message.clear {
+      font-size: 22px;
+      margin-top: 8px;
+      color: #ffea7f;
+      text-shadow: 0 0 10px #ff8, 0 0 14px #fa0;
     }
   </style>
 </head>
@@ -223,7 +247,7 @@
     const finalModeEl = document.getElementById('final-mode');
     const resultMsgEl = document.getElementById('result-message');
 
-    // 難易度ごとの設定（イージー / 旧ハード相当ノーマル / 地獄ハード）
+    // 難易度ごとの設定
     const DIFFICULTY_CONFIG = {
       easy: {
         totalTime: 60,
@@ -233,10 +257,9 @@
         baseWave: 1,
         waveScale: 2,
         maxEnemies: 60,
-        patterns: 'none'    // 直線のみ
+        patterns: 'none'
       },
       normal: {
-        // 前回「地獄化する前」のハード感を想定
         totalTime: 60,
         enemySpeedMul: 1.3,
         spawnBase: 800,
@@ -244,10 +267,9 @@
         baseWave: 1,
         waveScale: 3,
         maxEnemies: 90,
-        patterns: 'medium'  // 斜め/メテオ/ジグザグあり（控えめ）
+        patterns: 'medium'
       },
       hard: {
-        // 直前の地獄モードをそのまま
         totalTime: 100,
         enemySpeedMul: 1.6,
         spawnBase: 700,
@@ -255,14 +277,12 @@
         baseWave: 2,
         waveScale: 5,
         maxEnemies: 120,
-        patterns: 'hell'    // 激しい斜め/メテオ/ジグザグ
+        patterns: 'hell'
       }
     };
 
-    // 現在の難易度
     let difficulty = 'easy';
 
-    // ゲーム状態
     let playing = false;
     let timeLeft = 60;
     let score = 0;
@@ -368,23 +388,19 @@
         zigzagDir: Math.random() < 0.5 ? -1 : 1
       };
 
-      // 難易度別の動きパターン設定
       if (cfg.patterns === 'medium' || cfg.patterns === 'hell') {
         const pr = Math.random();
         if (pr < 0.33) {
-          // 斜め
           enemy.pattern = 'diagonal';
           const mul = cfg.patterns === 'hell'
             ? (1.0 + elapsedRatio * 1.4)
             : (0.8 + elapsedRatio * 0.9);
           enemy.vx = (Math.random() < 0.5 ? -1 : 1) * mul;
         } else if (pr < 0.66) {
-          // メテオ
-          const meteorMul = cfg.patterns === 'hell' ? 3.2 : 2.3;
           enemy.pattern = 'meteor';
+          const meteorMul = cfg.patterns === 'hell' ? 3.2 : 2.3;
           enemy.vy *= meteorMul;
         } else {
-          // ジグザグ
           enemy.pattern = 'zigzag';
           const zigMul = cfg.patterns === 'hell'
             ? (1.4 + elapsedRatio * 1.6)
@@ -664,12 +680,12 @@
         : difficulty === 'normal' ? 'NORMAL'
         : 'EASY';
 
+      // 豪華な「完全制覇！！」表示
+      resultMsgEl.classList.remove('clear');
+
       if (reason === 'clear') {
-        if (difficulty === 'hard') {
-          resultMsgEl.textContent = '100秒耐久クリア！お見事！';
-        } else {
-          resultMsgEl.textContent = 'タイムアップ！生還おめでとう！';
-        }
+        resultMsgEl.textContent = '完全制覇！！';
+        resultMsgEl.classList.add('clear');
       } else {
         if (score >= 1000) {
           resultMsgEl.textContent = '魔王討伐級！あなたは伝説のパイロットです。';
