@@ -164,8 +164,8 @@
       <p>
         ・縦画面・片手ドラッグ操作<br>
         ・20体撃破ごとにレベルアップ<br>
-        ・制限時間は 1 分<br>
-        ・ハードモードでは敵の動きが激しくなります
+        ・ノーマルは60秒、ハードは100秒生存を目指そう<br>
+        ・ハードモードでは敵の動きと数がさらに地獄級になります
       </p>
       <p id="hint">
         画面をドラッグした位置に自機が移動します。<br>
@@ -261,7 +261,8 @@
     ];
 
     function resetGame() {
-      timeLeft = 60;
+      // ハードのみ100秒、ノーマルは60秒
+      timeLeft = difficulty === 'hard' ? 100 : 60;
       score = 0;
       level = 1;
       killCount = 0;
@@ -297,8 +298,16 @@
     }
 
     function spawnEnemy() {
-      const elapsedRatio = (60 - timeLeft) / 60;
-      const baseSpeed = 0.5 + elapsedRatio * 1.2;
+      const elapsedRatio = (difficulty === 'hard'
+        ? ( (difficulty === 'hard' ? 100 : 60) - timeLeft ) / (difficulty === 'hard' ? 100 : 60)
+        : (60 - timeLeft) / 60);
+      // 上の行は「今の残り時間から経過割合を出す」式で、ハードは100秒版にしています
+
+      // ハードではさらに速く
+      let baseSpeed = 0.5 + elapsedRatio * 1.2;
+      if (difficulty === 'hard') {
+        baseSpeed *= 1.6;
+      }
 
       let type;
       const r = Math.random();
@@ -313,7 +322,7 @@
         score: type.score,
         x: Math.random() * (canvas.width - 32) + 16,
         y: -16,
-        vy: baseSpeed + Math.random() * 1.2,
+        vy: baseSpeed + Math.random() * 1.4,
         vx: 0,
         size: 12 + Math.random() * 4,
         hp: type.name === 'demon' ? 4 : 1,
@@ -325,13 +334,13 @@
         const pr = Math.random();
         if (pr < 0.33) {
           enemy.pattern = 'diagonal';
-          enemy.vx = (Math.random() < 0.5 ? -1 : 1) * (0.6 + elapsedRatio);
+          enemy.vx = (Math.random() < 0.5 ? -1 : 1) * (1.0 + elapsedRatio * 1.4);
         } else if (pr < 0.66) {
           enemy.pattern = 'meteor';
-          enemy.vy *= 2.5; // 高速メテオ
+          enemy.vy *= 3.2; // さらに速いメテオ
         } else {
           enemy.pattern = 'zigzag';
-          enemy.vx = enemy.zigzagDir * (0.9 + elapsedRatio * 1.1);
+          enemy.vx = enemy.zigzagDir * (1.4 + elapsedRatio * 1.6);
         }
       }
 
@@ -458,7 +467,9 @@
       if (timeLeft < 0) timeLeft = 0;
       timeEl.textContent = timeLeft.toFixed(0);
 
-      const elapsedRatio = (60 - timeLeft) / 60;
+      // 経過割合（ノーマル60秒・ハード100秒で正規化）
+      const totalTime = difficulty === 'hard' ? 100 : 60;
+      const elapsedRatio = (totalTime - timeLeft) / totalTime;
 
       const shotInterval =
         BASE_SHOT_INTERVAL / (1 + (level - 1) * 0.35);
@@ -467,11 +478,19 @@
         lastShotTime = now;
       }
 
-      const spawnInterval = 850 - elapsedRatio * 600;
+      // ハードは出現間隔がさらに短く、同時出現も多い
+      const baseInterval = difficulty === 'hard' ? 700 : 850;
+      const scaleInterval = difficulty === 'hard' ? 700 : 600;
+      const spawnInterval = baseInterval - elapsedRatio * scaleInterval;
+
       if (now - lastSpawnTime > spawnInterval) {
-        const waveCount = 1 + Math.floor(elapsedRatio * (difficulty === 'hard' ? 4 : 3));
+        const baseWave = difficulty === 'hard' ? 2 : 1;
+        const scaleWave = difficulty === 'hard' ? 5 : 3;
+        const waveCount = baseWave + Math.floor(elapsedRatio * scaleWave);
+        const maxEnemies = difficulty === 'hard' ? 120 : 80;
+
         for (let i = 0; i < waveCount; i++) {
-          if (enemies.length < (difficulty === 'hard' ? 100 : 80)) spawnEnemy();
+          if (enemies.length < maxEnemies) spawnEnemy();
         }
         lastSpawnTime = now;
       }
@@ -541,7 +560,7 @@
                 levelEl.textContent = level;
                 msgEl.textContent = 'LEVEL ' + level;
                 levelupBanner.classList.remove('show');
-                void levelupBanner.offsetWidth; // 再アニメ用
+                void levelupBanner.offsetWidth;
                 levelupBanner.classList.add('show');
                 setTimeout(() => {
                   if (msgEl.textContent.startsWith('LEVEL')) {
@@ -592,13 +611,17 @@
 
     function gameOver(reason) {
       playing = false;
-      finalTimeEl.textContent = (60 - timeLeft).toFixed(1);
+      const totalTime = difficulty === 'hard' ? 100 : 60;
+      finalTimeEl.textContent = (totalTime - timeLeft).toFixed(1);
       finalScoreEl.textContent = score;
       finalLevelEl.textContent = level;
       finalModeEl.textContent = difficulty === 'hard' ? 'HARD' : 'NORMAL';
 
       if (reason === 'clear') {
-        resultMsgEl.textContent = 'タイムアップ！生還おめでとう！';
+        resultMsgEl.textContent =
+          difficulty === 'hard'
+            ? '100秒耐久クリア！お見事！'
+            : 'タイムアップ！生還おめでとう！';
       } else {
         if (score >= 1000) {
           resultMsgEl.textContent = '魔王討伐級！あなたは伝説のパイロットです。';
